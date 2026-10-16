@@ -1,0 +1,53 @@
+{
+  "serviceId": "svc-a-token-intel",
+  "capability": "token-intelligence",
+  "dataNetwork": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+  "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+  "decimals": 6,
+  "supplyUi": "6861485940.010714",
+  "largestAccounts": [
+    {
+      "address": "6G4XDSge4txj5tBkA5gZqefXXE3BRxqA37Yb1pmrHv6N",
+      "amountUi": "1700000000.10888"
+    },
+    {
+      "address": "26ddLrqXDext6caX1gRxARePN4kzajyGiAUz9JmzmTGQ",
+      "amountUi": "1682700001.58308"
+    },
+    {
+      "address": "64cmXBSdHeBQ4zK9yVXtVuLMcVUwGg3fvG7fooSqHwmk",
+      "amountUi": "191569085.310442"
+    },
+    {
+      "address": "DpVH8xQZ4aapxwZ6KW9nuEUs9zEePa8HQvXny9Ajj93T",
+      "amountUi": "175960483.670319"
+    },
+    {
+      "address": "K6U4dQ8jANMEqQQycXYiDcf3172NGefpQBzdDbavQbA",
+      "amountUi": "173404950.752821"
+    },
+    {
+      "address": "79S8nKFYLog9dD8sQaYPnxKFda8sEPJwuhXNwng8zhdX",
+      "amountUi": "159890361"
+    },
+    {
+      "address": "7bEL9XkPGNg7a3oSiUERKsZtFoJMqKh6VhGDCmMCPqdg",
+      "amountUi": "126376933.041118"
+    },
+    {
+      "address": "DWVtxR7oo3uTiuM3o1cCxTJ5wM8Wnjvu1apwMkQhdedY",
+      "amountUi": "103869516.852063"
+    },
+    {
+      "address": "HG6XGeAwBueqMbubLbMMWRCfhC1wKjDJmQiJjjFdTJDc",
+      "amountUi": "94414767.978779"
+    },
+    {
+      "address": "7HbXjqp4BWCcRPh61ZdESdCfvQtyg7aQu7KKaGAChxX6",
+      "amountUi": "85000000"
+    }
+  ],
+  "top10TokenAccountSharePct": 65.48,
+  "asOf": "2026-10-16T23:08:54.089Z",
+  "source": "Helius Mainnet RPC (getTokenSupply, getTokenLargestAccounts)"
+}
