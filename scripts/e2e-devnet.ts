@@ -1,5 +1,6 @@
-// The live Devnet E2E for S1: facilitator preflight, then Service A in-process on 127.0.0.1:4021, then one
-// x402 purchase paid by the constrained buyer signer. Success needs every check (a)–(e); an HTTP 200 alone is never success.
+// The live Devnet E2E for S2: facilitator preflight, then Service A in-process on 127.0.0.1:4021, then one
+// x402 purchase through purchase (the policy engine first, then the payment by the constrained buyer signer),
+// then the session ledger. Success needs every check (a)–(e); an HTTP 200 alone is never success.
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,9 @@ import type { SettleResponse } from "@x402/core/types";
 import { paymentAsset, paymentNetwork, paymentRpcUrl } from "../src/config/networks.ts";
 import { createPayingFetch } from "../src/payments/client.ts";
 import { FacilitatorUnsupportedError, assertFacilitatorSupports } from "../src/payments/facilitator-preflight.ts";
+import { purchase, type PayAndFetch } from "../src/payments/purchase.ts";
+import * as rules from "../src/policy/rules.ts";
+import { createLedger, requestKeyFor, type LedgerView } from "../src/policy/session.ts";
 import { serviceA, type ServiceQuote } from "../src/registry/services.ts";
 import { createServiceA } from "../src/services/service-a.ts";
 import { JUP_MINT, createTokenIntelProvider, createTokenIntelRpc } from "../src/services/token-intel.ts";
@@ -45,6 +49,10 @@ function fail(check: string, detail: string): never {
 
 function pass(check: string, detail: string): void {
   console.log(`PASS ${check}: ${detail}`);
+}
+
+function printLedger(ledger: LedgerView): void {
+  console.log(`ledger: budget ${ledger.budgetAtomic}, committed ${ledger.committed()}, reserved ${ledger.reserved()}, remaining ${ledger.remaining()} (atomic)`);
 }
 
 // Sum of the payment-asset balance rows owned by the given wallet (0 when it has none).
@@ -104,18 +112,30 @@ async function main(): Promise<void> {
 
   const quote: ServiceQuote = { ...serviceA, payTo: wallets.seller };
   const paying = createPayingFetch({ signer, quote });
+  // Never throws: an error is returned with the count of signed requests, for purchase to map.
+  const payAndFetch: PayAndFetch = async (target) => {
+    try {
+      return { response: await paying.fetch(target), signedRequestsSent: paying.signedRequestsSent() };
+    } catch (error) {
+      return { error, signedRequestsSent: paying.signedRequestsSent() };
+    }
+  };
+  const ledger = createLedger(rules.sessionBudgetAtomic);
   const url = `http://${HOST}:${serviceA.port}${serviceA.endpointPath}?mint=${JUP_MINT}`;
+  printLedger(ledger);
   console.log(`buying ${quote.serviceId} for ${quote.priceUsd} (${quote.priceAtomic} atomic) from ${quote.payTo}`);
 
-  let response: Response;
-  try {
-    response = await paying.fetch(url);
-  } catch (error) {
-    server.close();
-    fail("purchase", `${error instanceof Error ? error.message : String(error)} (signed requests sent: ${paying.signedRequestsSent()})`);
-  }
+  const result = await purchase({ quote, method: "GET", url, ledger, rules, payAndFetch });
   server.close();
-  console.log(`signed requests sent: ${paying.signedRequestsSent()}`);
+  console.log(`purchase outcome: ${result.outcome}; signed requests sent: ${paying.signedRequestsSent()}`);
+  if (result.outcome !== "paid") {
+    printLedger(ledger);
+    if (result.outcome === "pending-reconciliation") {
+      console.error(`pending reconciliation: requestKey ${requestKeyFor(quote.serviceId, "GET", url)}, buyer ${wallets.buyer}`);
+    }
+    fail("purchase", JSON.stringify(result));
+  }
+  const response = result.response;
 
   // (a) HTTP 200
   if (response.status !== 200) fail("(a)", `HTTP ${response.status}: ${await response.text()}`);
@@ -163,6 +183,13 @@ async function main(): Promise<void> {
   if (body.serviceId !== serviceA.serviceId) fail("(e)", `serviceId is ${String(body.serviceId)}`);
   pass("(e)", `every Service A field present, serviceId ${body.serviceId}`);
   console.log(`data status: ${body.dataStatus} (asOf ${body.asOf})`);
+
+  // the session ledger after one committed purchase
+  printLedger(ledger);
+  if (ledger.committed() !== quote.priceAtomic || ledger.reserved() !== 0n || ledger.remaining() !== rules.sessionBudgetAtomic - quote.priceAtomic) {
+    fail("ledger", `expected committed ${quote.priceAtomic}, reserved 0, remaining ${rules.sessionBudgetAtomic - quote.priceAtomic}`);
+  }
+  pass("ledger", `budget ${ledger.budgetAtomic}, committed ${ledger.committed()}, remaining ${ledger.remaining()}`);
 
   console.log("e2e:devnet: all checks passed");
   process.exit(0);
