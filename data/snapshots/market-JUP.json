@@ -1,0 +1,13 @@
+{
+  "kind": "snapshot",
+  "notLive": true,
+  "source": "Jupiter Price API V3",
+  "sourceUrl": "https://api.jup.ag/price/v3?ids=JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+  "mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+  "asOf": "2026-11-06T22:31:26.223Z",
+  "capturedAt": "2026-11-06T22:31:26.546Z",
+  "priceUsd": 0.2447941616415981,
+  "priceChange24hPct": 1.656633246459385,
+  "decimals": 6,
+  "blockId": 466277767
+}
