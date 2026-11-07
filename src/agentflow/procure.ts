@@ -12,6 +12,8 @@
 //   that is not delivered ends the capability with no fallback, counts as a reliability failure and is listed in
 //   undelivered, so a capability is never paid for twice (FD-26).
 // One Procurement Decision Receipt per purchase attempt; events in order (S4-Q6), derived from the outcome.
+// onEvent (S6-Q5), when given, is called synchronously with a copy of each event as it is recorded, in order; an
+// exception it throws is caught and ignored, so a paid purchase never loses its receipt (U8).
 // It reads no environment variable and never sees the signer: payAndFetchFor is built by the caller.
 import type { PolicyRules } from "../policy/engine.ts";
 import type { Ledger } from "../policy/session.ts";
@@ -41,6 +43,16 @@ export type ProcurementResult = {
   reliability: Record<string, ReliabilityCounts>;
 };
 
+// Calls onEvent with a copy of the event; whatever it throws is ignored (U8).
+export function notify(onEvent: ((event: AgentEvent) => void) | undefined, event: AgentEvent): void {
+  if (onEvent === undefined) return;
+  try {
+    onEvent({ ...event });
+  } catch {
+    // ignored: a listener's failure never changes the run
+  }
+}
+
 const describeFailure = (result: PurchaseResult): string =>
   result.outcome === "failed-before-payment"
     ? `failed before payment: ${result.reason}`
@@ -57,6 +69,7 @@ export async function runProcurement({
   payAndFetchFor,
   now,
   runId,
+  onEvent,
 }: {
   capabilities: readonly string[];
   candidates: readonly TenderCandidateInput[];
@@ -66,6 +79,7 @@ export async function runProcurement({
   payAndFetchFor: (quote: ServiceQuote) => PayAndFetch;
   now: () => Date;
   runId: string;
+  onEvent?: (event: AgentEvent) => void;
 }): Promise<ProcurementResult> {
   const rounds: TenderRound[] = [];
   const receipts: ProcurementReceipt[] = [];
@@ -76,8 +90,11 @@ export async function runProcurement({
   const failed = new Set<string>();
   const reliability: Record<string, ReliabilityCounts> = {};
 
-  const emit = (name: AgentEventName, fields: Omit<AgentEvent, "name" | "at"> = {}) =>
-    void events.push({ name, at: now().toISOString(), ...fields });
+  const emit = (name: AgentEventName, fields: Omit<AgentEvent, "name" | "at"> = {}) => {
+    const event: AgentEvent = { name, at: now().toISOString(), ...fields };
+    events.push(event);
+    notify(onEvent, event);
+  };
   const count = (serviceId: string, outcome: "successes" | "failures") => {
     const counts = (reliability[serviceId] ??= { successes: 0, failures: 0 });
     counts[outcome] += 1;

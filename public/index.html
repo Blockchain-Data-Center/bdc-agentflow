@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BDC AgentFlow</title>
+<style>
+  :root {
+    --bdc-bg: #0A0A0F;
+    --bdc-elevated: #12121A;
+    --bdc-card: #1A1A24;
+    --bdc-border: #2A2A3A;
+    --bdc-text: #E8E8EF;
+    --bdc-muted: #A0A0B5;
+    --bdc-success: #00FF88;
+    --bdc-gradient: linear-gradient(135deg, #FF189C 0%, #FC5D6C 52%, #FEB024 100%);
+    --bdc-warning: #FEB024;
+    --bdc-danger: #FC5D6C;
+    --radius: 12px;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bdc-bg); color: var(--bdc-text); }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  a { color: var(--bdc-text); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 24px 16px 64px; }
+
+  header { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-bottom: 20px; border-bottom: 1px solid var(--bdc-border); }
+  header img { height: 44px; width: auto; display: block; }
+  header h1 { margin: 0; font-size: 26px; letter-spacing: -0.01em; line-height: 1.2; }
+  header h1 .accent { background: var(--bdc-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  header p { margin: 2px 0 0; color: var(--bdc-muted); }
+  .network {
+    margin: 16px 0 24px; padding: 10px 14px; border: 1px solid var(--bdc-border); border-radius: var(--radius);
+    background: var(--bdc-elevated); color: var(--bdc-muted); font-size: 14px;
+  }
+  .network strong { color: var(--bdc-text); }
+
+  section.card { background: var(--bdc-card); border: 1px solid var(--bdc-border); border-radius: var(--radius); padding: 20px; margin-bottom: 18px; }
+  section.card > h2 { margin: 0 0 14px; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--bdc-muted); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+  .muted { color: var(--bdc-muted); }
+  .empty { color: var(--bdc-muted); font-style: italic; }
+
+  label.field { display: block; font-size: 13px; color: var(--bdc-muted); margin-bottom: 6px; }
+  textarea, input[type="text"] {
+    width: 100%; background: var(--bdc-elevated); color: var(--bdc-text); border: 1px solid var(--bdc-border);
+    border-radius: 10px; padding: 10px 12px; font: inherit;
+  }
+  textarea { min-height: 84px; resize: vertical; }
+  textarea:focus, input:focus { outline: 2px solid #FC5D6C; outline-offset: 1px; }
+  .task-row { display: flex; gap: 20px; align-items: flex-end; flex-wrap: wrap; margin-top: 14px; }
+  .budget { width: 140px; }
+  .budget-input { display: flex; align-items: center; gap: 6px; }
+  .budget-input span { color: var(--bdc-muted); }
+  .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; padding-bottom: 8px; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch .track { width: 40px; height: 22px; border-radius: 11px; background: var(--bdc-border); position: relative; flex: none; transition: background 0.15s; }
+  .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--bdc-text); transition: transform 0.15s; }
+  .switch input:checked + .track { background: var(--bdc-danger); }
+  .switch input:checked + .track::after { transform: translateX(18px); }
+  .switch input:focus-visible + .track { outline: 2px solid #FC5D6C; outline-offset: 2px; }
+  button.primary {
+    background: var(--bdc-gradient); color: #0A0A0F; font-weight: 700; border: 0; border-radius: 10px;
+    padding: 11px 26px; font-size: 15px; cursor: pointer; margin-left: auto;
+  }
+  button.primary:disabled { opacity: 0.45; cursor: not-allowed; }
+  #status { margin-top: 12px; min-height: 22px; color: var(--bdc-muted); }
+  #status.error { color: var(--bdc-danger); }
+  #status.ok { color: var(--bdc-success); }
+
+  dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 14px; }
+  dl.facts dt { color: var(--bdc-muted); }
+  dl.facts dd { margin: 0; overflow-wrap: anywhere; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--bdc-border); font-size: 12px; color: var(--bdc-muted); margin-left: 6px; white-space: nowrap; }
+  .tag.label { border-color: var(--bdc-warning); color: var(--bdc-warning); }
+  .tag.good { border-color: var(--bdc-success); color: var(--bdc-success); }
+  .tag.bad { border-color: var(--bdc-danger); color: var(--bdc-danger); }
+  .banner { border: 1px solid var(--bdc-warning); color: var(--bdc-warning); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; }
+
+  .table-wrap { overflow-x: auto; border: 1px solid var(--bdc-border); border-radius: 10px; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bdc-border); vertical-align: top; }
+  th { color: var(--bdc-muted); font-weight: 600; background: var(--bdc-elevated); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  tr.selected td { background: rgba(0, 255, 136, 0.07); }
+  tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--bdc-success); }
+  td.reason { color: var(--bdc-muted); min-width: 260px; }
+
+  ol#activity { list-style: none; margin: 0; padding: 0; max-height: 420px; overflow-y: auto; }
+  ol#activity li { display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--bdc-border); }
+  ol#activity li:last-child { border-bottom: 0; }
+  ol#activity .time { color: var(--bdc-muted); }
+  ol#activity .what { font-weight: 600; }
+  ol#activity .detail { color: var(--bdc-muted); font-size: 13px; overflow-wrap: anywhere; }
+  ol#activity li.fail .what { color: var(--bdc-danger); }
+  ol#activity li.good .what { color: var(--bdc-success); }
+
+  .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .figure { background: var(--bdc-elevated); border: 1px solid var(--bdc-border); border-radius: 10px; padding: 12px; }
+  .figure .k { color: var(--bdc-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .figure .v { font-size: 22px; font-weight: 700; margin-top: 2px; }
+
+  details.receipt { border: 1px solid var(--bdc-border); border-radius: 10px; margin-bottom: 8px; background: var(--bdc-elevated); }
+  details.receipt summary { cursor: pointer; padding: 10px 12px; }
+  details.receipt pre { margin: 0; padding: 12px; border-top: 1px solid var(--bdc-border); overflow-x: auto; white-space: pre; }
+
+  #result-text { white-space: pre-wrap; background: var(--bdc-elevated); border: 1px solid var(--bdc-border); border-radius: 10px; padding: 14px; margin: 0 0 12px; overflow-wrap: anywhere; }
+  footer { color: var(--bdc-muted); font-size: 13px; margin-top: 28px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/bdc-logo.svg" alt="Blockchain Data Center (BDC)">
+    <div>
+      <h1>BDC <span class="accent">AgentFlow</span></h1>
+      <p>Autonomous AI service procurement with x402 payments on Solana</p>
+    </div>
+  </header>
+
+  <div class="network"><strong>Solana Devnet only.</strong> Every payment is in Devnet USDC, no real value. The agent proposes; the Procurement Policy Engine authorizes every purchase before anything is signed.</div>
+
+  <section class="card" id="task" aria-labelledby="task-h">
+    <h2 id="task-h">Task</h2>
+    <form id="run-form" novalidate>
+      <label class="field" for="goal">Goal</label>
+      <textarea id="goal" maxlength="500" spellcheck="false">Create a Solana token risk and market intelligence report. Maximum budget: $0.05.</textarea>
+      <div class="task-row">
+        <div class="budget">
+          <label class="field" for="budget">Maximum budget (USD)</label>
+          <div class="budget-input"><span>$</span><input id="budget" type="text" inputmode="decimal" value="0.05" autocomplete="off"></div>
+        </div>
+        <label class="switch" for="simulate">
+          <input id="simulate" type="checkbox">
+          <span class="track" aria-hidden="true"></span>
+          <span>Simulate provider failure (Market Intel B1 unavailable)</span>
+        </label>
+        <button class="primary" id="run" type="submit">Run AgentFlow</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0;font-size:13px">From $0.001 to $0.05; the per-service cap stays $0.01. Budget text in the goal is not parsed.</p>
+    </form>
+    <div id="status" role="status" aria-live="polite"></div>
+  </section>
+
+  <section class="card" aria-labelledby="plan-h">
+    <h2 id="plan-h">Procurement plan</h2>
+    <div id="plan"><p class="empty">Run AgentFlow to see the plan, the candidate suppliers and why each was selected.</p></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card" aria-labelledby="activity-h">
+      <h2 id="activity-h">Agent activity</h2>
+      <ol id="activity" aria-live="polite"></ol>
+      <p class="empty" id="activity-empty">No activity yet.</p>
+    </section>
+
+    <section class="card" aria-labelledby="budget-h">
+      <h2 id="budget-h">Budget</h2>
+      <div class="figures">
+        <div class="figure"><div class="k">Starting</div><div class="v" id="budget-start">–</div></div>
+        <div class="figure"><div class="k">Spent</div><div class="v" id="budget-spent">–</div></div>
+        <div class="figure"><div class="k">Remaining</div><div class="v" id="budget-remaining">–</div></div>
+      </div>
+      <p class="muted" style="font-size:13px;margin:12px 0 0">Devnet USDC. LLM usage is billed separately and is not part of this budget.</p>
+    </section>
+  </div>
+
+  <section class="card" aria-labelledby="purchases-h">
+    <h2 id="purchases-h">Purchases</h2>
+    <div id="purchases"><p class="empty">No purchase yet.</p></div>
+  </section>
+
+  <section class="card" aria-labelledby="receipts-h">
+    <h2 id="receipts-h">Procurement receipt</h2>
+    <div id="receipts"><p class="empty">Each purchase attempt gets a Procurement Decision Receipt.</p></div>
+  </section>
+
+  <section class="card" aria-labelledby="result-h">
+    <h2 id="result-h">Final result</h2>
+    <div id="result"><p class="empty">The composed result appears here.</p></div>
+  </section>
+
+  <footer>Built by Blockchain Data Center LLC (BDC). Runs locally; nothing is deployed.</footer>
+</div>
+
+<script>
+"use strict";
+// Every text from the user, the LLM, the services or the receipts is rendered with textContent / text nodes only.
+
+const WORDING = {
+  PLAN_CREATED: "Analyzing objective: plan created",
+  CAPABILITY_REQUIRED: "Identifying required capability",
+  SERVICE_CANDIDATES_FOUND: "Comparing suppliers",
+  SERVICE_SELECTED: "Supplier selected",
+  PROCUREMENT_DECISION_CREATED: "Procurement decision created",
+  PAYMENT_REQUIRED: "Payment required (x402)",
+  POLICY_APPROVED: "Spending policy: approved",
+  POLICY_REJECTED: "Spending policy: rejected",
+  PAYMENT_AUTHORIZED: "Payment submitted",
+  PAYMENT_SETTLED: "Payment settled on Solana Devnet",
+  RESOURCE_RECEIVED: "Resource received",
+  DELIVERY_VERIFIED: "Delivery verified",
+  SERVICE_FAILED: "Supplier failed",
+  SERVICE_SKIPPED: "Supplier skipped",
+  FALLBACK_SELECTED: "Alternative provider selected",
+  PROCUREMENT_RECEIPT_CREATED: "Procurement receipt created",
+  RESULT_COMPOSED: "Composing final result: done",
+};
+const FAILING = new Set(["POLICY_REJECTED", "SERVICE_FAILED", "SERVICE_SKIPPED"]);
+const GOOD = new Set(["POLICY_APPROVED", "PAYMENT_SETTLED", "DELIVERY_VERIFIED", "RESULT_COMPOSED"]);
+const FIELD_ERRORS = {
+  goal: "The goal must be 1 to 500 characters.",
+  budgetUsd: "The budget must be between $0.001 and $0.05, with at most three decimals.",
+  simulateFailure: "The failure switch must be on or off.",
+};
+const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{43,88}$/;
+
+const $ = (id) => document.getElementById(id);
+
+// el("tag", { class, text, attr... }, ...children): children are nodes or strings (text nodes).
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === undefined || value === null) continue;
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = String(value);
+    else node.setAttribute(key, String(value));
+  }
+  for (const child of children) if (child !== undefined && child !== null && child !== false) node.append(child);
+  return node;
+}
+
+// Atomic USDC units (6 decimals), as a string or bigint, in dollars with at least three decimals.
+function usd(atomic) {
+  const value = BigInt(atomic);
+  let digits = (value % 1000000n).toString().padStart(6, "0").replace(/0+$/, "");
+  if (digits.length < 3) digits = digits.padEnd(3, "0");
+  return "$" + (value / 1000000n).toString() + "." + digits;
+}
+
+function budgetToAtomic(text) {
+  const match = /^0\.(\d{1,3})$/.exec(text);
+  return match ? BigInt(match[1].padEnd(6, "0")) : null;
+}
+
+function timeOf(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
+function setStatus(text, kind) {
+  const status = $("status");
+  status.textContent = text;
+  status.className = kind || "";
+}
+
+function placeholder(id, text) {
+  $(id).replaceChildren(el("p", { class: "empty", text }));
+}
+
+function addActivity(event) {
+  $("activity-empty").hidden = true;
+  const where = [event.capability, event.serviceId].filter(Boolean).join(" · ");
+  const item = el(
+    "li",
+    { class: FAILING.has(event.name) ? "fail" : GOOD.has(event.name) ? "good" : "" },
+    el("span", { class: "time mono", text: timeOf(event.at) }),
+    el(
+      "div",
+      {},
+      el("div", { class: "what", text: WORDING[event.name] || event.name }),
+      where ? el("div", { class: "detail", text: where }) : null,
+      event.detail ? el("div", { class: "detail", text: event.detail }) : null,
+    ),
+  );
+  $("activity").append(item);
+  item.scrollIntoView({ block: "nearest" });
+}
+
+function table(headers, rows) {
+  return el(
+    "div",
+    { class: "table-wrap" },
+    el("table", {}, el("thead", {}, el("tr", {}, ...headers.map((header) => el("th", { scope: "col", text: header })))), el("tbody", {}, ...rows)),
+  );
+}
+
+function renderPlan(run) {
+  const plan = run.plan;
+  const procurement = run.procurement;
+  const parts = [];
+  if (procurement.stoppedEarly) parts.push(el("div", { class: "banner", text: "Stopped: a payment outcome is unknown; its amount stays reserved" }));
+  const source = el("dd", {}, plan.planSource === "llm" ? "LLM (Claude Haiku 5.5)" : "deterministic");
+  if (plan.label) source.append(el("span", { class: "tag label", text: plan.label }));
+  parts.push(
+    el(
+      "dl",
+      { class: "facts" },
+      el("dt", { text: "Interpretation" }), el("dd", { text: plan.interpretation }),
+      el("dt", { text: "Capabilities" }), el("dd", { text: plan.capabilities.length ? plan.capabilities.join(", ") : "none" }),
+      el("dt", { text: "Token" }), el("dd", { text: plan.token || "none" }),
+      el("dt", { text: "Not supported" }), el("dd", { text: plan.unsupported.length ? plan.unsupported.join("; ") : "none" }),
+      plan.refusal ? el("dt", { text: "Refusal" }) : null, plan.refusal ? el("dd", { text: plan.refusal }) : null,
+      el("dt", { text: "Plan source" }), source,
+    ),
+  );
+  for (const round of procurement.rounds) {
+    parts.push(el("h3", { text: "Agent Tender: " + round.capability + ", round " + round.round }));
+    parts.push(
+      table(
+        ["Candidate", "Price", "Reason code", "Reason"],
+        round.candidates.map((candidate) =>
+          el(
+            "tr",
+            { class: candidate.reasonCode === "SELECTED" ? "selected" : "" },
+            el("td", {}, el("div", { text: candidate.name }), el("div", { class: "muted mono", text: candidate.serviceId })),
+            el("td", { text: candidate.priceUsd }),
+            el("td", { class: "mono", text: candidate.reasonCode }),
+            el("td", { class: "reason", text: candidate.reasonText }),
+          ),
+        ),
+      ),
+    );
+  }
+  if (procurement.unfulfilled.length) {
+    parts.push(el("h3", { text: "Not obtained" }));
+    for (const entry of procurement.unfulfilled) {
+      const reasons = entry.reasons.map((reason) => (typeof reason === "string" ? reason : reason.serviceId + " " + reason.reasonCode + ": " + reason.reasonText));
+      parts.push(el("div", {}, el("strong", { text: entry.capability }), el("ul", {}, ...reasons.map((reason) => el("li", { class: "muted", text: reason })))));
+    }
+  }
+  if (procurement.undelivered.length) {
+    parts.push(el("h3", { text: "Paid but not delivered" }));
+    parts.push(el("ul", {}, ...procurement.undelivered.map((entry) => el("li", { text: entry.capability + " from " + entry.serviceId + ": paid, not delivered intact; not bought twice" }))));
+  }
+  $("plan").replaceChildren(...parts);
+}
+
+function explorerLink(signature) {
+  if (typeof signature !== "string" || !SIGNATURE.test(signature)) return null;
+  return el("a", {
+    href: "https://explorer.solana.com/tx/" + signature + "?cluster=devnet",
+    target: "_blank",
+    rel: "noopener noreferrer",
+    text: signature.slice(0, 8) + "…" + signature.slice(-8),
+    title: signature,
+  });
+}
+
+function renderPurchases(run) {
+  const receipts = run.procurement.receipts;
+  if (!receipts.length) return placeholder("purchases", "No purchase was attempted.");
+  $("purchases").replaceChildren(
+    table(
+      ["Service", "Capability", "Price", "Payment", "Selection reason", "Solana reference", "Delivered"],
+      receipts.map((receipt) => {
+        const service = el("td", {}, receipt.selected.name);
+        if (receipt.isFallback) service.append(el("span", { class: "tag label", text: "fallback" }));
+        const paid = receipt.paymentOutcome === "paid";
+        const policy = receipt.policy.decision === "rejected" ? "rejected by policy (" + receipt.policy.code + ")" : receipt.paymentOutcome;
+        return el(
+          "tr",
+          {},
+          service,
+          el("td", { text: receipt.capability }),
+          el("td", { text: receipt.quotedPriceUsd }),
+          el("td", {}, el("span", { class: "tag " + (paid ? "good" : "bad"), text: policy })),
+          el("td", { class: "reason", text: receipt.selected.reasonText }),
+          el("td", { class: "mono" }, explorerLink(receipt.transaction) || el("span", { class: "muted", text: "none" })),
+          el("td", { text: receipt.delivered ? "yes" : "no" }),
+        );
+      }),
+    ),
+  );
+}
+
+function renderReceipts(run) {
+  const receipts = run.procurement.receipts;
+  if (!receipts.length) return placeholder("receipts", "No receipt: no purchase was attempted.");
+  $("receipts").replaceChildren(
+    ...receipts.map((receipt) =>
+      el(
+        "details",
+        { class: "receipt" },
+        el("summary", { text: receipt.receiptId + " · " + receipt.selected.name + " · " + receipt.paymentOutcome }),
+        el("pre", { text: JSON.stringify(receipt, null, 2) }),
+      ),
+    ),
+  );
+}
+
+function renderBudget(startAtomic, run) {
+  $("budget-start").textContent = usd(startAtomic);
+  if (!run) {
+    $("budget-spent").textContent = usd(0n);
+    $("budget-remaining").textContent = usd(startAtomic);
+    return;
+  }
+  const spent = run.procurement.receipts.filter((receipt) => receipt.paymentOutcome === "paid").reduce((sum, receipt) => sum + BigInt(receipt.quotedPriceAtomic), 0n);
+  $("budget-spent").textContent = usd(spent);
+  $("budget-remaining").textContent = usd(run.procurement.ledgerRemainingAtomic);
+}
+
+function renderResult(run) {
+  const result = run.result;
+  const source = el("dd", {}, result.resultSource === "llm" ? "LLM (Claude Haiku 5.5)" : "deterministic");
+  if (result.label) source.append(el("span", { class: "tag label", text: result.label }));
+  $("result").replaceChildren(
+    el("pre", { id: "result-text", text: result.text }),
+    el("dl", { class: "facts" }, el("dt", { text: "Result source" }), source),
+    el("p", {
+      class: "muted",
+      text: "LLM usage (Claude API, not part of the x402 USDC session budget): " + run.usage.inputTokens + " input / " + run.usage.outputTokens + " output tokens.",
+    }),
+  );
+}
+
+let source = null;
+
+function finishRun(text, kind) {
+  if (source) source.close();
+  source = null;
+  $("run").disabled = false;
+  setStatus(text, kind);
+}
+
+$("run-form").addEventListener("submit", async (submitEvent) => {
+  submitEvent.preventDefault();
+  const goal = $("goal").value;
+  const budgetUsd = $("budget").value.trim();
+  const simulateFailure = $("simulate").checked;
+  $("run").disabled = true;
+  setStatus("Starting…");
+
+  let response;
+  try {
+    response = await fetch("/api/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ goal, budgetUsd, simulateFailure }),
+    });
+  } catch {
+    return finishRun("The AgentFlow server cannot be reached.", "error");
+  }
+  let body = {};
+  try {
+    body = await response.json();
+  } catch {
+    body = {};
+  }
+  if (response.status !== 202) {
+    const message =
+      response.status === 409 ? "A run is already in progress." : FIELD_ERRORS[body.error] || "The request was refused (" + response.status + ").";
+    return finishRun(message, "error");
+  }
+
+  const startAtomic = budgetToAtomic(budgetUsd);
+  $("activity").replaceChildren();
+  $("activity-empty").hidden = false;
+  placeholder("plan", "Planning… the plan and the Agent Tender appear when the run ends.");
+  placeholder("purchases", "Purchasing…");
+  placeholder("receipts", "Receipts appear when the run ends.");
+  placeholder("result", "Composing…");
+  if (startAtomic !== null) renderBudget(startAtomic, null);
+  setStatus("Running " + body.runId + (simulateFailure ? " with Market Intel B1 unavailable (simulated)" : "") + "…");
+
+  source = new EventSource("/api/runs/" + encodeURIComponent(body.runId) + "/events");
+  source.addEventListener("agent", (message) => {
+    try {
+      addActivity(JSON.parse(message.data));
+    } catch {
+      /* a malformed event is skipped */
+    }
+  });
+  source.addEventListener("done", (message) => {
+    let run;
+    try {
+      run = JSON.parse(message.data);
+    } catch {
+      return finishRun("The run ended, but its result could not be read.", "error");
+    }
+    renderPlan(run);
+    renderPurchases(run);
+    renderReceipts(run);
+    if (startAtomic !== null) renderBudget(startAtomic, run);
+    renderResult(run);
+    finishRun("Done. Remaining " + usd(run.procurement.ledgerRemainingAtomic) + " of " + (startAtomic !== null ? usd(startAtomic) : "the budget") + ".", "ok");
+  });
+  source.addEventListener("failed", (message) => {
+    let error = "Error";
+    try {
+      error = JSON.parse(message.data).error;
+    } catch {
+      /* keep the generic name */
+    }
+    finishRun("The run failed (" + error + "). No payment is repeated; see the activity above.", "error");
+  });
+  // No automatic reconnection: a reconnect would replay every event. The server ends the stream only after
+  // done or failed, which close it first.
+  source.onerror = () => {
+    if (source) finishRun("The connection to the run was lost; reload the page to start again.", "error");
+  };
+});
+</script>
+</body>
+</html>

@@ -13,7 +13,8 @@
     "wallets:check": "node --import tsx scripts/wallets-check.ts",
     "capture:token-intel": "node --env-file=.env --import tsx scripts/capture-token-intel.ts",
     "capture:market-snapshot": "node --env-file=.env --import tsx scripts/capture-market-snapshot.ts",
-    "e2e:devnet": "node --env-file=.env --import tsx scripts/e2e-devnet.ts"
+    "e2e:devnet": "node --env-file=.env --import tsx scripts/e2e-devnet.ts",
+    "ui": "node --env-file=.env --import tsx scripts/ui-server.ts"
   },
   "dependencies": {
     "@solana/kit": "5.5.1",

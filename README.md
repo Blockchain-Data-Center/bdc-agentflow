@@ -75,7 +75,7 @@ Goal to report on Devnet, with the LLM: proven on 2026-11-07 by two runs on the 
 
 ## Planned
 
-- The user interface (Slice 9) and submission hardening (Slice 10) are planned and not yet built.
+- Submission hardening (Slice 10) is planned and not yet built.
 
 ## Setup
 
@@ -91,3 +91,13 @@ Requires Node.js 22 or later.
 The market snapshot is already in the project. It was captured once with `npm run capture:market-snapshot`, which needs a Jupiter API key in `.env` as `JUPITER_API_KEY` and refuses to overwrite an existing snapshot.
 
 See `.env.example` for the variable names. Never commit `.env`.
+
+## Run the web UI
+
+The web UI (Task C, Slice 9, built in stage S6) runs locally, after the setup above:
+
+1. Start it: `npm run ui`
+2. Open http://127.0.0.1:4020 (it listens on this machine only; nothing is deployed)
+3. Enter a goal and a maximum budget from $0.001 to $0.05 (it can lower the session budget, never raise it above the policy's $0.05), optionally turn on "Simulate provider failure (Market Intel B1 unavailable)", and press Run AgentFlow
+
+The page shows the plan with the Agent Tender's table for every round, the agent's activity as it happens, the budget, each purchase with its Solana Explorer link, each Procurement Decision Receipt and the composed result. Solana Devnet only: every payment is in Devnet USDC, which has no real value.

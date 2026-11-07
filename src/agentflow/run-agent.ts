@@ -4,6 +4,9 @@
 // The LLM never sets or raises the budget ("Maximum budget" in a goal is never parsed: the session budget is the
 // policy's, FD-02), never chooses a supplier and never reaches the signer. A refused or empty plan buys nothing.
 // It reads no environment variable: llm is the client's complete, or undefined for the deterministic path.
+// onEvent (S6-Q5): the planner's events after planTask returns, the procurement's as they are recorded, then the
+// composer's after composeResult returns, in the order of the returned events; its exceptions are ignored (U8).
+// The session budget (rules.sessionBudgetAtomic) is passed to the composer for its budget line (S6-Q6).
 import { addUsage, type ClaudeUsage, type Complete } from "../llm/claude.ts";
 import type { PolicyRules } from "../policy/engine.ts";
 import type { Ledger } from "../policy/session.ts";
@@ -12,7 +15,7 @@ import type { ServiceQuote } from "../registry/services.ts";
 import { composeResult, type ComposedResult } from "./composer.ts";
 import type { AgentEvent } from "./events.ts";
 import { planTask, type Plan } from "./planner.ts";
-import { runProcurement, type ProcurementResult } from "./procure.ts";
+import { notify, runProcurement, type ProcurementResult } from "./procure.ts";
 import type { TenderCandidateInput } from "./tender.ts";
 
 export type AgentRun = {
@@ -35,6 +38,7 @@ export async function runAgent({
   payAndFetchFor,
   now,
   runId,
+  onEvent,
 }: {
   goal: string;
   llm: Complete | undefined;
@@ -46,10 +50,22 @@ export async function runAgent({
   payAndFetchFor: (quote: ServiceQuote) => PayAndFetch;
   now: () => Date;
   runId: string;
+  onEvent?: (event: AgentEvent) => void;
 }): Promise<AgentRun> {
   const planned = await planTask({ goal, candidates, llm, llmOff, now });
+  for (const event of planned.events) notify(onEvent, event);
   // A refused or empty plan has no capability: runProcurement then makes no purchase call.
-  const procurement = await runProcurement({ capabilities: planned.plan.capabilities, candidates, ledger, rules, quoteFor, payAndFetchFor, now, runId });
+  const procurement = await runProcurement({
+    capabilities: planned.plan.capabilities,
+    candidates,
+    ledger,
+    rules,
+    quoteFor,
+    payAndFetchFor,
+    now,
+    runId,
+    ...(onEvent !== undefined ? { onEvent } : {}),
+  });
   const composed = await composeResult({
     goal,
     plan: planned.plan,
@@ -58,7 +74,9 @@ export async function runAgent({
     llm,
     llmOff,
     now,
+    budgetAtomic: rules.sessionBudgetAtomic,
   });
+  for (const event of composed.events) notify(onEvent, event);
   return {
     plan: planned.plan,
     procurement,
