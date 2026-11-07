@@ -195,3 +195,7 @@ Nothing of this is built. AgentFlow has no Marketplace integration, and no avail
 Encode Club Solana Hackathon 2026. Slices 1–9 are built and proven on Solana Devnet: the x402 payment path, the Procurement Policy Engine, the second service, agent planning, the Agent Tender, the Procurement Decision Receipt, result composition with the figure check, the fallback, and the web UI. Slice 10 (submission hardening) is these four documents; nothing is deployed.
 
 Market data snapshot: Jupiter Price API V3. Token data: Helius Mainnet RPC.
+
+## Copyright and licence
+
+Copyright © 2026 Blockchain Data Center LLC (BDC). All rights reserved. This repository is public so that its code can be read, run and evaluated, including by the judges of the Encode Club Solana Hackathon 2026. Beyond that, and beyond the rights GitHub's Terms of Service give other users to view and fork public repositories on GitHub, no licence is granted to use, copy, modify or distribute the original AgentFlow code. Third-party dependencies and data sources remain under their own terms.

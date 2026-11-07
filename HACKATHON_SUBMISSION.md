@@ -82,7 +82,7 @@ Following the hackathon, Blockchain Data Center LLC (BDC), which builds blockcha
 
 https://github.com/Blockchain-Data-Center/bdc-agentflow
 
-Visibility: To be added at submission.
+Visibility: Public. Copyright © 2026 Blockchain Data Center LLC (BDC); all rights reserved, no open-source licence (see the README).
 
 Setup and run instructions: [README.md](README.md). Branch `task-a`. The offline test suite (`npm test`) has 25 test files and 96 tests.
 

@@ -2,6 +2,7 @@
   "name": "bdc-agentflow",
   "version": "0.0.0",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "engines": {
     "node": ">=22"
