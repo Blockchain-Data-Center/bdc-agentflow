@@ -4,7 +4,7 @@ Autonomous AI Service Procurement with x402 Payments on Solana.
 
 BDC AgentFlow is an autonomous procurement layer for AI agents. Give an agent a goal and a spending budget, and it can evaluate, purchase, and compose the digital services it needs using x402 payments on Solana while remaining inside programmable spending policies.
 
-Status: in development for the Encode Club Solana Hackathon 2026 — Task A (payment core) and Task B stage S4 (procurement judgment, no LLM)
+Status: in development for the Encode Club Solana Hackathon 2026 — Task A (payment core) and Task B (procurement judgment in stage S4, no LLM; agent planning and result composition in stage S5, with an LLM)
 
 Devnet only; no real funds.
 
@@ -59,9 +59,22 @@ Agent Tender, receipts and fallback on Devnet: proven on 2026-11-07 by two runs 
 - `npm run e2e:devnet`: the Tender selected Token Intel A (the only token-intelligence provider) and Market Intel B1 (the cheaper of two market-intelligence providers, B2 ranked lower). Token Intel A ($0.005) settled in Solana Devnet transaction `3CAS5ZfkA7mP4K82fRBvr7mX1F86e2LScy6i8gzEFF8dd6aRLzyuPzy9vrmpvxfApR8toW6DkPeExMbJaZFijcpP` ([Solana Explorer](https://explorer.solana.com/tx/3CAS5ZfkA7mP4K82fRBvr7mX1F86e2LScy6i8gzEFF8dd6aRLzyuPzy9vrmpvxfApR8toW6DkPeExMbJaZFijcpP?cluster=devnet)) and Market Intel B1 ($0.004) in `ckq5PCdwWwLDj5V8p8on7VgD41WvUREtQuAJpA6PQfaZGyW9ERBqmAysUKRjJsmo8sozVWCKdUdR1mXP6sCWwto` ([Solana Explorer](https://explorer.solana.com/tx/ckq5PCdwWwLDj5V8p8on7VgD41WvUREtQuAJpA6PQfaZGyW9ERBqmAysUKRjJsmo8sozVWCKdUdR1mXP6sCWwto?cluster=devnet)); two receipts; the session budget went 50000 → 45000 → 41000 (atomic units). Service A served its labelled cached fallback in this run, with the recorded cause `getTokenLargestAccounts failed: rpc-error`.
 - `npm run e2e:devnet -- --fail-b1`: Market Intel B1 made unavailable. Token Intel A ($0.005) settled in `42QTAUV15W4JSR4PMpPaD9ikzcE6kbx8eqA74MHXxHnDHLvW23EYnhy9QjXvDbC7e8gUz2WJ2wW6bLBgZW6NQR2f` ([Solana Explorer](https://explorer.solana.com/tx/42QTAUV15W4JSR4PMpPaD9ikzcE6kbx8eqA74MHXxHnDHLvW23EYnhy9QjXvDbC7e8gUz2WJ2wW6bLBgZW6NQR2f?cluster=devnet)) with live Mainnet data; the Tender selected B1, which answered HTTP 503 before any payment was requested and was recorded as failed with no payment; the Tender ran again, excluded B1 as failed, and selected Market Intel B2 ($0.008), which settled in `tWRrcK7xr7w3syQ7ytbtyh5BBooSY67khm4UHWFraVbZb81YNXefhLmESg8HmBoF3rGtcwLAVuE5RqxNNXPVZFb` ([Solana Explorer](https://explorer.solana.com/tx/tWRrcK7xr7w3syQ7ytbtyh5BBooSY67khm4UHWFraVbZb81YNXefhLmESg8HmBoF3rGtcwLAVuE5RqxNNXPVZFb?cluster=devnet)); three receipts, the third marked as a fallback; the session budget went 50000 → 45000 → 45000 → 37000 (atomic units).
 
+Task B, Slices 4 and 7 (agent planning, result composition), built in stage S5 with Claude Haiku 5.5 (`claude-haiku-5-5`) on the Claude API, called with plain `fetch` (no SDK), one attempt per call with a 20-second timeout:
+
+- a planner that reads a written goal and proposes the capabilities to buy. The LLM sees the goal and each registry entry's capability and name only (no prices, no addresses) and answers in a fixed JSON schema; its answer is checked against the registry by code: a capability the registry does not offer is reported as unsupported, and a goal naming a token the approved providers do not serve is refused, with nothing bought. The approved providers serve JUP only;
+- a composer that turns the delivered resources into one short plain-text report. It sees the goal, the plan, the delivered data and a summary of the purchases (capability, provider, quoted price, outcome, fallback), never a wallet address, a transaction signature or a fingerprint, and it names cached-fallback and snapshot data as such, with their dates;
+- the LLM only proposes and explains: the Agent Tender chooses each supplier and the policy engine authorizes every purchase, as before. Budget text in a goal (such as "Maximum budget: $0.05") is not parsed; the policy budget of $0.05 always applies, and every result says so. The LLM never sees signing material;
+- when the LLM is unavailable (no API key, an error, a timeout, an invalid answer) or switched off with `--llm-off`, the run continues with a keyword-based plan and a template summary, visibly labelled `LLM unavailable — deterministic plan` and `LLM unavailable — deterministic summary`. That plan also refuses a goal naming another token. Purchases, policy checks and receipts are the same on either path;
+- the Claude API's token usage is printed for each call and in total; it is not part of the x402 USDC session budget;
+- offline tests for the API client (with a stand-in `fetch` and a dummy key), the planner's checks and refusals, the composer, the deterministic path and the whole agent run.
+
+Goal to report on Devnet, with the LLM: proven on 2026-11-07 by two runs on the brief's demo goal ("Create a Solana token risk and market intelligence report. Maximum budget: $0.05."), each paid purchase checked as above. In both runs Claude Haiku 5.5 planned the two capabilities (token intelligence, then market intelligence) for JUP, noting that the goal names no token, and composed the report, naming the market data as a dated snapshot; Service A served live Mainnet data in both:
+
+- `npm run e2e:devnet`: Token Intel A ($0.005) settled in Solana Devnet transaction `5HTYm2HLefwKXxnZgv34vCWkzNZv77A5LxYjCkZcFbhPaiG8SfPZwyKL3TLD5kwgqunyexzPqqcuD3Dge5HK1mUP` ([Solana Explorer](https://explorer.solana.com/tx/5HTYm2HLefwKXxnZgv34vCWkzNZv77A5LxYjCkZcFbhPaiG8SfPZwyKL3TLD5kwgqunyexzPqqcuD3Dge5HK1mUP?cluster=devnet)) and Market Intel B1 ($0.004) in `4iXgfHE2MksXv44JHsryv6C5zQ2ouQM7uU5wHRSakFwoWxG5Y7Pz74gAEkPHFdpFXXRvPpt3rvf2KTwqVigc1BDU` ([Solana Explorer](https://explorer.solana.com/tx/4iXgfHE2MksXv44JHsryv6C5zQ2ouQM7uU5wHRSakFwoWxG5Y7Pz74gAEkPHFdpFXXRvPpt3rvf2KTwqVigc1BDU?cluster=devnet)); the session budget went 50000 → 45000 → 41000 (atomic units); the Claude API used 2459 input and 1368 output tokens.
+- `npm run e2e:devnet -- --fail-b1`: Token Intel A ($0.005) settled in `4vtAVbV3NBjHUAtN326UqE2FKezP2Vjfb1M4cH4dCspnZ6xEfK37uwCUQQTzHxHx8dTtTtzNFhsGrjnZKkVB3vsL` ([Solana Explorer](https://explorer.solana.com/tx/4vtAVbV3NBjHUAtN326UqE2FKezP2Vjfb1M4cH4dCspnZ6xEfK37uwCUQQTzHxHx8dTtTtzNFhsGrjnZKkVB3vsL?cluster=devnet)); Market Intel B1 answered HTTP 503 before any payment was requested and was not retried; the Tender selected Market Intel B2 ($0.008), which settled in `3JPVYuHdGcppdizEri6cuksdr29kCPKXT3QF8C3DhrYGfDerY276SuXp5ZwNN7qxxee7ERA4tSbZfoAAr6sMAVLX` ([Solana Explorer](https://explorer.solana.com/tx/3JPVYuHdGcppdizEri6cuksdr29kCPKXT3QF8C3DhrYGfDerY276SuXp5ZwNN7qxxee7ERA4tSbZfoAAr6sMAVLX?cluster=devnet)), and the report named B2 as a fallback provider; the session budget went 50000 → 45000 → 45000 → 37000 (atomic units); the Claude API used 2535 input and 1372 output tokens. An earlier `--fail-b1` run the same afternoon ended without market data: B2's payment could not be created before anything was signed (cause not recorded), so nothing was paid for it, B2 was not retried, and the report stated market intelligence as not obtained; the run was repeated once, unchanged.
+
 ## Planned
 
-- Agent planning from a written goal (Slice 4) and result composition (Slice 7), with an LLM, are planned and not yet built.
 - The user interface (Slice 9) and submission hardening (Slice 10) are planned and not yet built.
 
 ## Setup
@@ -69,11 +82,11 @@ Agent Tender, receipts and fallback on Devnet: proven on 2026-11-07 by two runs 
 Requires Node.js 22 or later.
 
 1. Install: `npm install`
-2. Create the Devnet buyer and seller wallets: `npm run wallets:create` (writes `.env`, which is git-ignored, and `wallets.public.json`; prints only the public addresses), then add your own Helius API key to `.env` as `HELIUS_API_KEY` (used only for the Mainnet token-intel reads)
+2. Create the Devnet buyer and seller wallets: `npm run wallets:create` (writes `.env`, which is git-ignored, and `wallets.public.json`; prints only the public addresses), then add your own Helius API key to `.env` as `HELIUS_API_KEY` (used only for the Mainnet token-intel reads) and, for the LLM, your own Claude API key as `ANTHROPIC_API_KEY` (optional: without it the labelled deterministic path runs)
 3. Fund the buyer with Devnet SOL and Devnet USDC, and make sure the seller's Devnet USDC token account exists
 4. Check the wallets: `npm run wallets:check`
 5. Run the offline tests: `npm test`
-6. Run the live Devnet purchases: `npm run e2e:devnet` (prints the Tender table, the receipts and the events), and the controlled failure with the Tender's fallback provider: `npm run e2e:devnet -- --fail-b1`
+6. Run the live Devnet purchases: `npm run e2e:devnet` (the brief's demo goal; prints the plan, the Tender table, the receipts, the events, the composed result and the LLM usage), and the controlled failure with the Tender's fallback provider: `npm run e2e:devnet -- --fail-b1`. Another goal: `npm run e2e:devnet -- --goal "<your goal>"`; without the LLM: add `--llm-off`
 
 The market snapshot is already in the project. It was captured once with `npm run capture:market-snapshot`, which needs a Jupiter API key in `.env` as `JUPITER_API_KEY` and refuses to overwrite an existing snapshot.
 

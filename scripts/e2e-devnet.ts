@@ -1,9 +1,13 @@
-// The live Devnet E2E for S4: facilitator preflight, then the services in-process on 127.0.0.1 (A on 4021, B1 on
-// 4022, and with --fail-b1 also B2 on 4023), then runProcurement over the capabilities [token-intelligence,
-// market-intelligence] and the registry: the Agent Tender selects each supplier, each purchase is one purchase call
-// (the policy engine first, then the payment by the constrained buyer signer), and each attempt gets a Procurement
-// Decision Receipt. With --fail-b1, B1 answers 503 before its paywall and the Tender re-runs and selects B2.
-// Success needs every check (a)–(e) for each paid purchase; an HTTP 200 alone is never success.
+// The live Devnet E2E for S5: facilitator preflight, then the services in-process on 127.0.0.1 (A on 4021, B1 on
+// 4022, and with --fail-b1 also B2 on 4023), then runAgent on a written goal (--goal "<text>", default the brief's
+// demo goal): the planner (Claude Haiku 5.5, or the labelled deterministic plan with --llm-off or when the LLM is
+// unavailable) proposes the capabilities, runProcurement buys them over the registry (the Agent Tender selects each
+// supplier, each purchase is one purchase call: the policy engine first, then the payment by the constrained buyer
+// signer, and each attempt gets a Procurement Decision Receipt), and the composer reports on what was delivered.
+// With --fail-b1, B1 answers 503 before its paywall and the Tender re-runs and selects B2.
+// Success needs every check (a)–(e) for each paid purchase; an HTTP 200 alone is never success. The expected record
+// shape (and, with --fail-b1, B1's own check) applies to the default goal only; with --goal, the paid purchases and
+// the ledger are checked. The Claude API usage is printed apart: it is not part of the x402 USDC session budget.
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { fileURLToPath } from "node:url";
@@ -12,10 +16,12 @@ import { createSolanaRpc, signature } from "@solana/kit";
 import { decodePaymentResponseHeader } from "@x402/core/http";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import type { SettleResponse } from "@x402/core/types";
-import { runProcurement, type Delivery } from "../src/agentflow/procure.ts";
+import type { Delivery } from "../src/agentflow/procure.ts";
 import type { ProcurementReceipt } from "../src/agentflow/receipt.ts";
+import { runAgent } from "../src/agentflow/run-agent.ts";
 import { serviceUrlFor, SESSION_HOST, SESSION_METHOD } from "../src/agentflow/run-session.ts";
 import { paymentAsset, paymentNetwork, paymentRpcUrl } from "../src/config/networks.ts";
+import { CLAUDE_MODEL, ClaudeError, createClaudeClient, type Complete } from "../src/llm/claude.ts";
 import { createPayingFetch } from "../src/payments/client.ts";
 import { FacilitatorUnsupportedError, assertFacilitatorSupports } from "../src/payments/facilitator-preflight.ts";
 import type { PayAndFetch } from "../src/payments/purchase.ts";
@@ -31,6 +37,12 @@ const FACILITATOR_URL = "https://x402.org/facilitator";
 const POLL_ATTEMPTS = 10;
 const POLL_INTERVAL_MS = 2000;
 const FAIL_B1 = process.argv.includes("--fail-b1");
+const LLM_OFF = process.argv.includes("--llm-off");
+// The brief's demo goal. "Maximum budget" in a goal is never parsed: the session budget is the policy's (FD-02).
+const DEMO_GOAL = "Create a Solana token risk and market intelligence report. Maximum budget: $0.05.";
+const GOAL_INDEX = process.argv.indexOf("--goal");
+const GOAL_GIVEN = GOAL_INDEX !== -1;
+const GOAL = GOAL_GIVEN ? process.argv[GOAL_INDEX + 1] : DEMO_GOAL;
 
 const SERVICE_A_FIELDS = [
   "serviceId",
@@ -63,9 +75,7 @@ const RESPONSE_FIELDS: Record<string, readonly string[]> = {
   [serviceB2.serviceId]: [...SERVICE_B_FIELDS, "providerNote"],
 };
 
-const CAPABILITIES = ["token-intelligence", "market-intelligence"];
-
-// What each run must end with (S3-Q5, S4-Q8), as records derived from the receipts.
+// What each run with the default goal must end with (S3-Q5, S4-Q8, S5-Q9), as records derived from the receipts.
 type RunRecord = { serviceId: string; outcome: ProcurementReceipt["paymentOutcome"]; code?: string; remainingAfter: bigint };
 const EXPECTED: RunRecord[] = FAIL_B1
   ? [
@@ -208,8 +218,45 @@ async function verifyPaid(
   console.log(`${label} data status: ${body.dataStatus} (asOf ${body.asOf})${body.fallbackCause !== undefined ? `, fallbackCause: ${body.fallbackCause}` : ""}`);
 }
 
+// The LLM's complete, printing each call's token usage (S5-Q7); a failed call's counts come from its ClaudeError.
+function withUsageLines(complete: Complete): Complete {
+  let calls = 0;
+  return async (request) => {
+    calls += 1;
+    const label = `LLM call ${calls} (${request.jsonSchema !== undefined ? "planner" : "composer"})`;
+    try {
+      const reply = await complete(request);
+      console.log(`${label}: ${reply.usage.inputTokens} input / ${reply.usage.outputTokens} output tokens`);
+      return reply;
+    } catch (error) {
+      if (error instanceof ClaudeError) {
+        console.log(`${label} failed: ${error.message}; ${error.usage.inputTokens} input / ${error.usage.outputTokens} output tokens`);
+      } else {
+        console.log(`${label} failed: ${error instanceof Error ? error.name : typeof error}`);
+      }
+      throw error;
+    }
+  };
+}
+
 async function main(): Promise<void> {
-  console.log(`e2e:devnet: capabilities [${CAPABILITIES.join(", ")}]${FAIL_B1 ? ", --fail-b1: B1 unavailable, the Tender selects the replacement" : ""}`);
+  if (GOAL_GIVEN && (GOAL === undefined || GOAL.trim() === "" || GOAL.startsWith("--"))) fail("setup", "--goal needs the goal text after it");
+  console.log(`e2e:devnet: goal ${JSON.stringify(GOAL)}${GOAL_GIVEN ? "" : " (the default demo goal)"}${FAIL_B1 ? ", --fail-b1: B1 unavailable, the Tender selects the replacement" : ""}${LLM_OFF ? ", --llm-off" : ""}`);
+
+  // The LLM client, unless --llm-off; a missing key or any failure to create it takes the labelled deterministic
+  // path (R8). The key is never printed: only the variable's name can appear in the message.
+  let llm: Complete | undefined;
+  if (LLM_OFF) {
+    console.log("LLM: off (--llm-off), no client created; the labelled deterministic plan and summary are used");
+  } else {
+    try {
+      llm = withUsageLines(createClaudeClient().complete);
+      console.log(`LLM: ${CLAUDE_MODEL}`);
+    } catch (error) {
+      console.log(`LLM: unavailable (${error instanceof Error ? error.message : typeof error}); the labelled deterministic plan and summary are used`);
+    }
+  }
+
   const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
   await preflight(facilitator);
 
@@ -270,8 +317,10 @@ async function main(): Promise<void> {
   const ledger = createLedger(rules.sessionBudgetAtomic);
   printLedger(ledger);
   const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-  const result = await runProcurement({
-    capabilities: CAPABILITIES,
+  const agent = await runAgent({
+    goal: GOAL,
+    llm,
+    llmOff: LLM_OFF,
     candidates: services,
     ledger,
     rules,
@@ -281,7 +330,9 @@ async function main(): Promise<void> {
     runId,
   });
   for (const server of servers) server.close();
+  const result = agent.procurement;
   console.log(`runId: ${runId}`);
+  console.log(`plan: ${JSON.stringify(agent.plan, null, 2)}`);
 
   // The Tender table of every round, per capability.
   for (const round of result.rounds) {
@@ -292,10 +343,10 @@ async function main(): Promise<void> {
   }
   // Each receipt as JSON, then the events in order.
   for (const receipt of result.receipts) console.log(`receipt: ${JSON.stringify(receipt, null, 2)}`);
-  for (const event of result.events) {
+  for (const event of agent.events) {
     console.log(`event: ${event.name}${event.capability ? ` [${event.capability}]` : ""}${event.serviceId ? ` ${event.serviceId}` : ""}${event.detail ? ` — ${event.detail}` : ""}`);
   }
-  console.log(`events: ${result.events.map((event) => event.name).join(", ")}`);
+  console.log(`events: ${agent.events.map((event) => event.name).join(", ")}`);
   for (const delivery of result.deliveries.filter((candidate) => candidate.capability === "token-intelligence")) {
     const body = delivery.body as { dataStatus?: unknown; fallbackCause?: unknown };
     console.log(`token-intelligence ${delivery.serviceId} dataStatus: ${String(body.dataStatus)}${body.fallbackCause !== undefined ? `, fallbackCause: ${String(body.fallbackCause)}` : ""}`);
@@ -303,6 +354,10 @@ async function main(): Promise<void> {
   console.log(`unfulfilled: ${JSON.stringify(result.unfulfilled.map(({ capability, reasons }) => ({ capability, reasons: reasons.map((reason) => (typeof reason === "string" ? reason : `${reason.serviceId} ${reason.reasonCode}`)) })))}`);
   console.log(`undelivered: ${JSON.stringify(result.undelivered)}`);
   console.log(`reliability: ${JSON.stringify(result.reliability)}`);
+  console.log(`planSource: ${agent.plan.planSource}${agent.plan.label ? ` (${agent.plan.label})` : ""}${agent.plan.llmError ? `, llmError: ${agent.plan.llmError}` : ""}`);
+  console.log(`resultSource: ${agent.result.resultSource}${agent.result.label ? ` (${agent.result.label})` : ""}${agent.result.llmError ? `, llmError: ${agent.result.llmError}` : ""}`);
+  console.log(`result:\n${agent.result.text}`);
+  console.log(`LLM usage (Claude API, not part of the x402 USDC session budget): ${agent.usage.inputTokens} input / ${agent.usage.outputTokens} output tokens.`);
 
   const records = result.receipts.map(recordOf);
   for (const record of records) {
@@ -320,14 +375,18 @@ async function main(): Promise<void> {
     fail("session", "stopped early on a pending-reconciliation purchase");
   }
 
-  // The run must have gone exactly as expected.
-  const shape = (list: readonly RunRecord[]) =>
-    JSON.stringify(list.map(({ serviceId, outcome, code, remainingAfter }) => ({ serviceId, outcome, code, remainingAfter: String(remainingAfter) })));
-  if (shape(records) !== shape(EXPECTED)) fail("session", `records differ from the expected ${shape(EXPECTED)}`);
-  pass("session", `${records.map((record) => `${record.serviceId} ${record.outcome}`).join(", ")}`);
+  // With the default goal, the run must have gone exactly as expected (S5-Q9: not with another goal).
+  if (!GOAL_GIVEN) {
+    const shape = (list: readonly RunRecord[]) =>
+      JSON.stringify(list.map(({ serviceId, outcome, code, remainingAfter }) => ({ serviceId, outcome, code, remainingAfter: String(remainingAfter) })));
+    if (shape(records) !== shape(EXPECTED)) fail("session", `records differ from the expected ${shape(EXPECTED)}`);
+    pass("session", `${records.map((record) => `${record.serviceId} ${record.outcome}`).join(", ")}`);
+  } else {
+    console.log("session: --goal given, the expected record shape is not checked; the paid purchases and the ledger are");
+  }
 
-  // B1 in failMode: SERVICE_FAILED with no payment.
-  if (FAIL_B1) {
+  // B1 in failMode, with the default goal: SERVICE_FAILED with no payment.
+  if (FAIL_B1 && !GOAL_GIVEN) {
     const sent = signedSent.get(serviceB1.serviceId)?.() ?? -1;
     if (sent !== 0) fail(`${serviceB1.serviceId}`, `${sent} signed requests sent, expected 0`);
     if (ledger.status(requestKeyFor(serviceB1.serviceId, SESSION_METHOD, serviceUrlFor(quoteFor(serviceB1.serviceId)))) !== undefined) {
@@ -349,7 +408,7 @@ async function main(): Promise<void> {
   // The session ledger after the run.
   printLedger(ledger);
   const spent = records.filter((record) => record.outcome === "paid").reduce((sum, record) => sum + quoteFor(record.serviceId).priceAtomic, 0n);
-  const expectedRemaining = EXPECTED[EXPECTED.length - 1].remainingAfter;
+  const expectedRemaining = GOAL_GIVEN ? rules.sessionBudgetAtomic - spent : EXPECTED[EXPECTED.length - 1].remainingAfter;
   if (ledger.committed() !== spent || ledger.reserved() !== 0n || ledger.remaining() !== expectedRemaining) {
     fail("ledger", `expected committed ${spent}, reserved 0, remaining ${expectedRemaining}`);
   }
