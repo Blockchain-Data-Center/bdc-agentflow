@@ -8,7 +8,7 @@ import { dataNetwork } from "../config/networks.ts";
 
 export const JUP_MINT = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 export const TOKEN_INTEL_SOURCE = "Helius Mainnet RPC (getTokenSupply, getTokenLargestAccounts)";
-export const LIVE_TIMEOUT_MS = 5000;
+export const LIVE_TIMEOUT_MS = 20000; // FD-19: 5 s → 20 s for Service A's live read; the capture keeps its own 30 s
 
 const HELIUS_KEY_VARIABLE = "HELIUS_API_KEY";
 const HELIUS_MAINNET_RPC = "https://mainnet.helius-rpc.com/";
@@ -65,7 +65,14 @@ export type TokenIntelData = {
   source: string;
 };
 
-export type TokenIntelBody = TokenIntelData & { dataStatus: "live" | "cached fallback" };
+// fallbackCause is set on a cached fallback only (FD-19): why the live read failed, as the method and status of a
+// TokenIntelRpcError, otherwise the error class name only; never the URL, the key or a request header.
+export type TokenIntelBody = TokenIntelData & { dataStatus: "live" | "cached fallback"; fallbackCause?: string };
+
+function fallbackCauseOf(error: unknown): string {
+  if (error instanceof TokenIntelRpcError) return error.message;
+  return error instanceof Error ? error.name : typeof error;
+}
 
 // Share of supply held by the given raw amounts, in percent, rounded half-up to 2 decimals, in bigint.
 export function sharePct(supplyRaw: bigint, amountsRaw: readonly bigint[]): number {
@@ -136,7 +143,8 @@ export function readTokenIntelCache(cachePath: string | URL): TokenIntelData {
   return JSON.parse(readFileSync(cachePath, "utf8")) as TokenIntelData;
 }
 
-// Live data when the RPC answers; otherwise the cache file, labelled "cached fallback" with its own asOf.
+// Live data when the RPC answers; otherwise the cache file, labelled "cached fallback" with its own asOf and
+// the recorded cause of the fallback.
 export function createTokenIntelProvider({
   rpc,
   cachePath,
@@ -149,8 +157,8 @@ export function createTokenIntelProvider({
   return async (mint) => {
     try {
       return { ...(await fetchTokenIntel(rpc, mint, now)), dataStatus: "live" };
-    } catch {
-      return { ...readTokenIntelCache(cachePath), dataStatus: "cached fallback" };
+    } catch (error) {
+      return { ...readTokenIntelCache(cachePath), dataStatus: "cached fallback", fallbackCause: fallbackCauseOf(error) };
     }
   };
 }

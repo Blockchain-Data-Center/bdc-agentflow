@@ -1,7 +1,8 @@
-// The live Devnet E2E for S3: facilitator preflight, then the services in-process on 127.0.0.1 (A on 4021, B1 on
-// 4022, and with --fail-b1 also B2 on 4023), then the plan [A, B1] through runSession: each purchase is one
-// purchase call (the policy engine first, then the payment by the constrained buyer signer), and the session ledger.
-// With --fail-b1, B1 answers 503 before its paywall and B2 is bought as its alternate.
+// The live Devnet E2E for S4: facilitator preflight, then the services in-process on 127.0.0.1 (A on 4021, B1 on
+// 4022, and with --fail-b1 also B2 on 4023), then runProcurement over the capabilities [token-intelligence,
+// market-intelligence] and the registry: the Agent Tender selects each supplier, each purchase is one purchase call
+// (the policy engine first, then the payment by the constrained buyer signer), and each attempt gets a Procurement
+// Decision Receipt. With --fail-b1, B1 answers 503 before its paywall and the Tender re-runs and selects B2.
 // Success needs every check (a)–(e) for each paid purchase; an HTTP 200 alone is never success.
 import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
@@ -11,7 +12,9 @@ import { createSolanaRpc, signature } from "@solana/kit";
 import { decodePaymentResponseHeader } from "@x402/core/http";
 import { HTTPFacilitatorClient } from "@x402/core/server";
 import type { SettleResponse } from "@x402/core/types";
-import { runSession, serviceUrlFor, SESSION_HOST, SESSION_METHOD, type SessionRecord } from "../src/agentflow/run-session.ts";
+import { runProcurement, type Delivery } from "../src/agentflow/procure.ts";
+import type { ProcurementReceipt } from "../src/agentflow/receipt.ts";
+import { serviceUrlFor, SESSION_HOST, SESSION_METHOD } from "../src/agentflow/run-session.ts";
 import { paymentAsset, paymentNetwork, paymentRpcUrl } from "../src/config/networks.ts";
 import { createPayingFetch } from "../src/payments/client.ts";
 import { FacilitatorUnsupportedError, assertFacilitatorSupports } from "../src/payments/facilitator-preflight.ts";
@@ -60,8 +63,11 @@ const RESPONSE_FIELDS: Record<string, readonly string[]> = {
   [serviceB2.serviceId]: [...SERVICE_B_FIELDS, "providerNote"],
 };
 
-// What each run must end with (S3-Q5).
-const EXPECTED: { serviceId: string; outcome: SessionRecord["outcome"]; code?: string; remainingAfter: bigint }[] = FAIL_B1
+const CAPABILITIES = ["token-intelligence", "market-intelligence"];
+
+// What each run must end with (S3-Q5, S4-Q8), as records derived from the receipts.
+type RunRecord = { serviceId: string; outcome: ProcurementReceipt["paymentOutcome"]; code?: string; remainingAfter: bigint };
+const EXPECTED: RunRecord[] = FAIL_B1
   ? [
       { serviceId: serviceA.serviceId, outcome: "paid", remainingAfter: 45_000n },
       { serviceId: serviceB1.serviceId, outcome: "failed-before-payment", code: "SERVICE_FAILED", remainingAfter: 45_000n },
@@ -130,12 +136,30 @@ function listen(app: Express, entry: ServiceEntry): Promise<Server> {
   });
 }
 
-// S1-Q9 (a)–(e) for one paid purchase, with that service's own price and response definition.
-async function verifyPaid(quote: ServiceQuote, response: Response, wallets: { buyer: string; seller: string }): Promise<void> {
+// The record of one attempt, derived from its receipt (R5).
+function recordOf(receipt: ProcurementReceipt): RunRecord {
+  const code =
+    receipt.paymentOutcome === "failed-before-payment" ? "SERVICE_FAILED" : receipt.paymentOutcome === "payment-failed" ? "PAYMENT_FAILED" : undefined;
+  return {
+    serviceId: receipt.selected.serviceId,
+    outcome: receipt.paymentOutcome,
+    ...(code !== undefined ? { code } : {}),
+    remainingAfter: BigInt(receipt.budgetAfterAtomic),
+  };
+}
+
+// S1-Q9 (a)–(e) for one paid purchase, with that service's own price and response definition. The body was read
+// once by the runner and kept only when delivered (S4-Q5); the response's status and headers are read here.
+async function verifyPaid(
+  quote: ServiceQuote,
+  response: Response,
+  delivery: Delivery | undefined,
+  wallets: { buyer: string; seller: string },
+): Promise<void> {
   const label = quote.serviceId;
 
   // (a) HTTP 200
-  if (response.status !== 200) fail(`${label} (a)`, `HTTP ${response.status}: ${await response.text()}`);
+  if (response.status !== 200) fail(`${label} (a)`, `HTTP ${response.status}, resource not delivered (FD-26)`);
   pass(`${label} (a)`, "HTTP 200");
 
   // (b) PAYMENT-RESPONSE
@@ -173,18 +197,19 @@ async function verifyPaid(quote: ServiceQuote, response: Response, wallets: { bu
   if (buyerDelta !== -quote.priceAtomic) fail(`${label} (d)`, `buyer delta ${buyerDelta}, expected -${quote.priceAtomic}`);
   pass(`${label} (d)`, `seller +${sellerDelta}, buyer ${buyerDelta}`);
 
-  // (e) the body carries every field of that service's response definition
+  // (e) the kept body carries every field of that service's response definition
+  if (!delivery) fail(`${label} (e)`, "resource not delivered: body is not JSON");
   const fields = RESPONSE_FIELDS[quote.serviceId];
-  const body = (await response.json()) as Record<string, unknown>;
+  const body = delivery.body as Record<string, unknown>;
   const missing = fields.filter((field) => !(field in body));
   if (missing.length > 0) fail(`${label} (e)`, `missing fields: ${missing.join(", ")}`);
   if (body.serviceId !== quote.serviceId) fail(`${label} (e)`, `serviceId is ${String(body.serviceId)}`);
   pass(`${label} (e)`, `every field of its response definition present, serviceId ${body.serviceId}`);
-  console.log(`${label} data status: ${body.dataStatus} (asOf ${body.asOf})`);
+  console.log(`${label} data status: ${body.dataStatus} (asOf ${body.asOf})${body.fallbackCause !== undefined ? `, fallbackCause: ${body.fallbackCause}` : ""}`);
 }
 
 async function main(): Promise<void> {
-  console.log(`e2e:devnet: plan [A, B1]${FAIL_B1 ? ", --fail-b1: B1 unavailable, alternate B2" : ""}`);
+  console.log(`e2e:devnet: capabilities [${CAPABILITIES.join(", ")}]${FAIL_B1 ? ", --fail-b1: B1 unavailable, the Tender selects the replacement" : ""}`);
   const facilitator = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
   await preflight(facilitator);
 
@@ -244,29 +269,62 @@ async function main(): Promise<void> {
 
   const ledger = createLedger(rules.sessionBudgetAtomic);
   printLedger(ledger);
-  const plan = [serviceA.serviceId, serviceB1.serviceId];
-  const alternates: Record<string, string> = FAIL_B1 ? { [serviceB1.serviceId]: serviceB2.serviceId } : {};
-  const result = await runSession({ plan, alternates, ledger, rules, quoteFor, payAndFetchFor });
+  const runId = `run-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  const result = await runProcurement({
+    capabilities: CAPABILITIES,
+    candidates: services,
+    ledger,
+    rules,
+    quoteFor,
+    payAndFetchFor,
+    now: () => new Date(),
+    runId,
+  });
   for (const server of servers) server.close();
+  console.log(`runId: ${runId}`);
 
-  for (const record of result.records) {
+  // The Tender table of every round, per capability.
+  for (const round of result.rounds) {
+    console.log(`tender: ${round.capability}, round ${round.round}`);
+    for (const candidate of round.candidates) {
+      console.log(`  ${candidate.serviceId}  ${candidate.priceUsd}  ${candidate.reasonCode}: ${candidate.reasonText}`);
+    }
+  }
+  // Each receipt as JSON, then the events in order.
+  for (const receipt of result.receipts) console.log(`receipt: ${JSON.stringify(receipt, null, 2)}`);
+  for (const event of result.events) {
+    console.log(`event: ${event.name}${event.capability ? ` [${event.capability}]` : ""}${event.serviceId ? ` ${event.serviceId}` : ""}${event.detail ? ` — ${event.detail}` : ""}`);
+  }
+  console.log(`events: ${result.events.map((event) => event.name).join(", ")}`);
+  for (const delivery of result.deliveries.filter((candidate) => candidate.capability === "token-intelligence")) {
+    const body = delivery.body as { dataStatus?: unknown; fallbackCause?: unknown };
+    console.log(`token-intelligence ${delivery.serviceId} dataStatus: ${String(body.dataStatus)}${body.fallbackCause !== undefined ? `, fallbackCause: ${String(body.fallbackCause)}` : ""}`);
+  }
+  console.log(`unfulfilled: ${JSON.stringify(result.unfulfilled.map(({ capability, reasons }) => ({ capability, reasons: reasons.map((reason) => (typeof reason === "string" ? reason : `${reason.serviceId} ${reason.reasonCode}`)) })))}`);
+  console.log(`undelivered: ${JSON.stringify(result.undelivered)}`);
+  console.log(`reliability: ${JSON.stringify(result.reliability)}`);
+
+  const records = result.receipts.map(recordOf);
+  for (const record of records) {
+    const price = quoteFor(record.serviceId).priceAtomic;
     console.log(
-      `record: ${record.serviceId} ${record.amountAtomic} atomic, outcome ${record.outcome}${record.code ? ` (${record.code})` : ""}, signed requests sent ${signedSent.get(record.serviceId)?.() ?? 0}, remaining after ${record.remainingAfter}`,
+      `record: ${record.serviceId} ${price} atomic, outcome ${record.outcome}${record.code ? ` (${record.code})` : ""}, signed requests sent ${signedSent.get(record.serviceId)?.() ?? 0}, remaining after ${record.remainingAfter}`,
     );
   }
-  console.log(`remaining: ${[rules.sessionBudgetAtomic, ...result.records.map((record) => record.remainingAfter)].join(" → ")}`);
+  console.log(`remaining: ${[rules.sessionBudgetAtomic, ...records.map((record) => record.remainingAfter)].join(" → ")}`);
   if (result.stoppedEarly) {
     printLedger(ledger);
-    const last = result.records[result.records.length - 1];
-    console.error(`pending reconciliation: requestKey ${requestKeyFor(last.serviceId, SESSION_METHOD, serviceUrlFor(quoteFor(last.serviceId)))}, buyer ${wallets.buyer}`);
+    const last = result.receipts[result.receipts.length - 1];
+    const lastId = last.selected.serviceId;
+    console.error(`pending reconciliation: requestKey ${requestKeyFor(lastId, SESSION_METHOD, serviceUrlFor(quoteFor(lastId)))}, buyer ${wallets.buyer}`);
     fail("session", "stopped early on a pending-reconciliation purchase");
   }
 
-  // The session must have run exactly as expected for this run.
-  const shape = (records: readonly { serviceId: string; outcome: string; code?: string; remainingAfter: bigint }[]) =>
-    JSON.stringify(records.map(({ serviceId, outcome, code, remainingAfter }) => ({ serviceId, outcome, code, remainingAfter: String(remainingAfter) })));
-  if (shape(result.records) !== shape(EXPECTED)) fail("session", `records differ from the expected ${shape(EXPECTED)}`);
-  pass("session", `${result.records.map((record) => `${record.serviceId} ${record.outcome}`).join(", ")}`);
+  // The run must have gone exactly as expected.
+  const shape = (list: readonly RunRecord[]) =>
+    JSON.stringify(list.map(({ serviceId, outcome, code, remainingAfter }) => ({ serviceId, outcome, code, remainingAfter: String(remainingAfter) })));
+  if (shape(records) !== shape(EXPECTED)) fail("session", `records differ from the expected ${shape(EXPECTED)}`);
+  pass("session", `${records.map((record) => `${record.serviceId} ${record.outcome}`).join(", ")}`);
 
   // B1 in failMode: SERVICE_FAILED with no payment.
   if (FAIL_B1) {
@@ -279,16 +337,18 @@ async function main(): Promise<void> {
   }
 
   // S1-Q9 (a)–(e) for each paid purchase.
-  for (const record of result.records.filter((candidate) => candidate.outcome === "paid")) {
-    const response = responses.get(record.serviceId);
-    if (!response) fail(`${record.serviceId}`, "no response kept");
-    if (record.transaction === undefined) fail(`${record.serviceId}`, "paid without a transaction");
-    await verifyPaid(quoteFor(record.serviceId), response, wallets);
+  for (const receipt of result.receipts.filter((candidate) => candidate.paymentOutcome === "paid")) {
+    const serviceId = receipt.selected.serviceId;
+    const response = responses.get(serviceId);
+    if (!response) fail(`${serviceId}`, "no response kept");
+    if (receipt.transaction === undefined) fail(`${serviceId}`, "paid without a transaction");
+    const delivery = result.deliveries.find((candidate) => candidate.serviceId === serviceId);
+    await verifyPaid(quoteFor(serviceId), response, delivery, wallets);
   }
 
   // The session ledger after the run.
   printLedger(ledger);
-  const spent = result.records.filter((record) => record.outcome === "paid").reduce((sum, record) => sum + record.amountAtomic, 0n);
+  const spent = records.filter((record) => record.outcome === "paid").reduce((sum, record) => sum + quoteFor(record.serviceId).priceAtomic, 0n);
   const expectedRemaining = EXPECTED[EXPECTED.length - 1].remainingAfter;
   if (ledger.committed() !== spent || ledger.reserved() !== 0n || ledger.remaining() !== expectedRemaining) {
     fail("ledger", `expected committed ${spent}, reserved 0, remaining ${expectedRemaining}`);

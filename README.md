@@ -4,7 +4,7 @@ Autonomous AI Service Procurement with x402 Payments on Solana.
 
 BDC AgentFlow is an autonomous procurement layer for AI agents. Give an agent a goal and a spending budget, and it can evaluate, purchase, and compose the digital services it needs using x402 payments on Solana while remaining inside programmable spending policies.
 
-Status: in development for the Encode Club Solana Hackathon 2026 — Task A (payment core)
+Status: in development for the Encode Club Solana Hackathon 2026 — Task A (payment core) and Task B stage S4 (procurement judgment, no LLM)
 
 Devnet only; no real funds.
 
@@ -44,9 +44,25 @@ Two sequential paid purchases and one controlled failure with a fallback provide
 - `npm run e2e:devnet`: the plan Service A, then Market Intel B1. Service A ($0.005) settled in Solana Devnet transaction `4GuGzHm6hRavk5uHJPNcPw8SoaRmj73zhKVv5A1X7356CurtxEi2xXG28WoxgrMpop293eoZ3oq8EatETwh8zz1j` ([Solana Explorer](https://explorer.solana.com/tx/4GuGzHm6hRavk5uHJPNcPw8SoaRmj73zhKVv5A1X7356CurtxEi2xXG28WoxgrMpop293eoZ3oq8EatETwh8zz1j?cluster=devnet)) and Market Intel B1 ($0.004) in `65M5W2qZh9BGA5n5Jj8FNCe9Ztg25KofwMHrkDscX1JDaxDHXyNaKw6WtQVx2tHMzqJYKTYSkTfDqeEwTbBgTARN` ([Solana Explorer](https://explorer.solana.com/tx/65M5W2qZh9BGA5n5Jj8FNCe9Ztg25KofwMHrkDscX1JDaxDHXyNaKw6WtQVx2tHMzqJYKTYSkTfDqeEwTbBgTARN?cluster=devnet)); the session budget went 50000 → 45000 → 41000 (atomic units).
 - `npm run e2e:devnet -- --fail-b1`: the same plan with Market Intel B1 made unavailable. Service A ($0.005) settled in `uhGauaq5QnkGhnTTZJLZJsTYAH4jV5oUc34hFNxQ4cD6uJX8B5LzYNdQkCPkR6c3V58h5AcXN6ZxTaXbPUQvk9D` ([Solana Explorer](https://explorer.solana.com/tx/uhGauaq5QnkGhnTTZJLZJsTYAH4jV5oUc34hFNxQ4cD6uJX8B5LzYNdQkCPkR6c3V58h5AcXN6ZxTaXbPUQvk9D?cluster=devnet)); B1 answered HTTP 503 before any payment was requested, was recorded as failed with no payment, and was not retried; the alternate Market Intel B2 ($0.008) settled in `UHMKdfZDuGrzLTTFjPPabemRnUMbDoG3pdFNUN3R4qhKfmBwUhHb7CmznZ6q7iQ9nVFctb5cXmMLgpiJkM2iw1w` ([Solana Explorer](https://explorer.solana.com/tx/UHMKdfZDuGrzLTTFjPPabemRnUMbDoG3pdFNUN3R4qhKfmBwUhHb7CmznZ6q7iQ9nVFctb5cXmMLgpiJkM2iw1w?cluster=devnet)); the session budget went 50000 → 45000 → 37000 (atomic units).
 
+Task B, Slices 5, 6 and 8 (Agent Tender, Procurement Decision Receipt, fallback), built in stage S4 with no LLM:
+
+- an Agent Tender that compares every registry candidate for a required capability before any money is spent: it excludes a candidate that is not active, has already failed in this run, is above the $0.01 per-service cap or above the remaining budget, ranks the rest by price (cheapest first; on a tie, the run's simple reliability count, then the service id), and gives every candidate a reason code and a one-sentence reason. The Tender only selects; every selected purchase still passes the policy engine before anything is signed;
+- a procurement runner that buys by capability: the Tender's choice is bought through the policy engine; when a provider fails before payment or the payment explicitly fails, the failure is recorded, that provider is never retried, and the Tender runs again on the remaining candidates and its new choice is bought, through the same policy engine. A candidate the policy engine rejects is not replaced by another one: the capability is reported as not obtained. A resource that was paid for but not delivered intact (not HTTP 200 with a JSON body) is not bought a second time from another provider: it is reported as not delivered. When the outcome of a signed payment is unknown, the run stops;
+- a Procurement Decision Receipt for every purchase attempt (paid, failed, rejected or pending): the capability, every candidate considered with its reason, the selected provider and why, the quoted price, the policy decision, the budget before and after, the payment outcome, the Solana Devnet transaction and its Explorer link when paid, whether the resource was delivered, the time, and SHA-256 fingerprints of the request and of the delivered body. It is application-level JSON, printed by the run; nothing is written on-chain and nothing is saved to disk;
+- structured events for each step (capability required, candidates found, supplier selected or fallback selected, procurement decision, policy approved or rejected, payment required, authorized and settled, resource received, delivery verified, service failed, receipt created). They are derived from each purchase's outcome, not observed on the wire;
+- the reliability signal is a count of successes and failures per provider within one run only; nothing is kept between runs;
+- Service A records why it served its cached fallback (the failing RPC method and status, or the error class only), and its live read now waits up to 20 seconds;
+- offline tests for the Tender, the receipts, the runner (including the fallback, a policy rejection, a capability with no eligible candidate, an unknown payment outcome and a paid but undelivered resource) and Service A's fallback cause.
+
+Agent Tender, receipts and fallback on Devnet: proven on 2026-11-07 by two runs over the capabilities token intelligence, then market intelligence, each paid purchase checked as above:
+
+- `npm run e2e:devnet`: the Tender selected Token Intel A (the only token-intelligence provider) and Market Intel B1 (the cheaper of two market-intelligence providers, B2 ranked lower). Token Intel A ($0.005) settled in Solana Devnet transaction `3CAS5ZfkA7mP4K82fRBvr7mX1F86e2LScy6i8gzEFF8dd6aRLzyuPzy9vrmpvxfApR8toW6DkPeExMbJaZFijcpP` ([Solana Explorer](https://explorer.solana.com/tx/3CAS5ZfkA7mP4K82fRBvr7mX1F86e2LScy6i8gzEFF8dd6aRLzyuPzy9vrmpvxfApR8toW6DkPeExMbJaZFijcpP?cluster=devnet)) and Market Intel B1 ($0.004) in `ckq5PCdwWwLDj5V8p8on7VgD41WvUREtQuAJpA6PQfaZGyW9ERBqmAysUKRjJsmo8sozVWCKdUdR1mXP6sCWwto` ([Solana Explorer](https://explorer.solana.com/tx/ckq5PCdwWwLDj5V8p8on7VgD41WvUREtQuAJpA6PQfaZGyW9ERBqmAysUKRjJsmo8sozVWCKdUdR1mXP6sCWwto?cluster=devnet)); two receipts; the session budget went 50000 → 45000 → 41000 (atomic units). Service A served its labelled cached fallback in this run, with the recorded cause `getTokenLargestAccounts failed: rpc-error`.
+- `npm run e2e:devnet -- --fail-b1`: Market Intel B1 made unavailable. Token Intel A ($0.005) settled in `42QTAUV15W4JSR4PMpPaD9ikzcE6kbx8eqA74MHXxHnDHLvW23EYnhy9QjXvDbC7e8gUz2WJ2wW6bLBgZW6NQR2f` ([Solana Explorer](https://explorer.solana.com/tx/42QTAUV15W4JSR4PMpPaD9ikzcE6kbx8eqA74MHXxHnDHLvW23EYnhy9QjXvDbC7e8gUz2WJ2wW6bLBgZW6NQR2f?cluster=devnet)) with live Mainnet data; the Tender selected B1, which answered HTTP 503 before any payment was requested and was recorded as failed with no payment; the Tender ran again, excluded B1 as failed, and selected Market Intel B2 ($0.008), which settled in `tWRrcK7xr7w3syQ7ytbtyh5BBooSY67khm4UHWFraVbZb81YNXefhLmESg8HmBoF3rGtcwLAVuE5RqxNNXPVZFb` ([Solana Explorer](https://explorer.solana.com/tx/tWRrcK7xr7w3syQ7ytbtyh5BBooSY67khm4UHWFraVbZb81YNXefhLmESg8HmBoF3rGtcwLAVuE5RqxNNXPVZFb?cluster=devnet)); three receipts, the third marked as a fallback; the session budget went 50000 → 45000 → 45000 → 37000 (atomic units).
+
 ## Planned
 
-- Later slices of the hackathon brief (agent planning, provider comparison, procurement receipts, result composition, user interface) are planned and not yet built.
+- Agent planning from a written goal (Slice 4) and result composition (Slice 7), with an LLM, are planned and not yet built.
+- The user interface (Slice 9) and submission hardening (Slice 10) are planned and not yet built.
 
 ## Setup
 
@@ -57,7 +73,7 @@ Requires Node.js 22 or later.
 3. Fund the buyer with Devnet SOL and Devnet USDC, and make sure the seller's Devnet USDC token account exists
 4. Check the wallets: `npm run wallets:check`
 5. Run the offline tests: `npm test`
-6. Run the live Devnet purchases: `npm run e2e:devnet`, and the controlled failure with its fallback provider: `npm run e2e:devnet -- --fail-b1`
+6. Run the live Devnet purchases: `npm run e2e:devnet` (prints the Tender table, the receipts and the events), and the controlled failure with the Tender's fallback provider: `npm run e2e:devnet -- --fail-b1`
 
 The market snapshot is already in the project. It was captured once with `npm run capture:market-snapshot`, which needs a Jupiter API key in `.env` as `JUPITER_API_KEY` and refuses to overwrite an existing snapshot.
 
